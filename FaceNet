@@ -1,0 +1,110 @@
+import os
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, Dense, Flatten, Dropout
+from tensorflow.keras import utils
+from tensorflow.keras.preprocessing import image
+from tensorflow.keras.preprocessing import image_dataset_from_directory
+from tensorflow.keras.applications.resnet50 import ResNet50
+from sklearn.model_selection import train_test_split
+from keras.models import model_from_json
+from PIL import Image
+import matplotlib.pyplot as plt
+import cv2 as cv
+import sys
+from google.colab import files
+from numpy import load
+from sklearn.metrics import accuracy_score
+from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import Normalizer
+from sklearn.svm import SVC
+import tensorflow_datasets as tfds
+
+%matplotlib inline
+
+
+model = ResNet50(weights='imagenet')
+
+batch_size=5000
+image_size=(224, 224)
+
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+
+train_dataset = image_dataset_from_directory('/content/drive/MyDrive/№10 8ТХ train + test/train',
+                                            seed=42,
+                                             batch_size=batch_size,
+                                             image_size=image_size)
+
+test_dataset = image_dataset_from_directory('/content/drive/MyDrive/№10 8ТХ train + test/test',
+                                             batch_size=batch_size,
+                                             image_size=image_size)
+
+AUTOTUNE = tf.data.experimental.AUTOTUNE
+
+train_dataset = train_dataset.prefetch(buffer_size=AUTOTUNE)
+#validation_dataset = validation_dataset.prefetch(buffer_size=AUTOTUNE)
+test_dataset = test_dataset.prefetch(buffer_size=AUTOTUNE)
+
+
+def get_embedding(model, face_pixels):
+	# scale pixel values
+	face_pixels = np.array(face_pixels, dtype=np.float32)
+	# standardize pixel values across channels (global)
+	mean, std = face_pixels.mean(), face_pixels.std()
+	face_pixels = (face_pixels - mean) / std
+	# transform face into one sample
+	samples = np.expand_dims(face_pixels, axis=0)
+	# make prediction to get embedding
+	yhat = model.predict(samples)
+	return yhat[0]
+
+
+numpy_images = []
+numpy_labels = []
+
+
+for images, labels in train_dataset:
+    numpy_images = images.numpy()
+    numpy_labels = labels.numpy()
+
+numpy_images_test = []
+numpy_labels_test = []
+for images, labels in test_dataset: 
+    numpy_images_test = images.numpy()
+    numpy_labels_test = labels.numpy()
+
+newTrainX = list()
+for face_pixels in numpy_images:
+	embedding = get_embedding(model, face_pixels)
+	newTrainX.append(embedding)
+newTrainX = np.asarray(newTrainX)
+print(newTrainX.shape)
+
+# convert each face in the test set to an embedding
+newTestX = list()
+for face_pixels in numpy_images_test:
+	embedding = get_embedding(model, face_pixels)
+	newTestX.append(embedding)
+newTestX = np.asarray(newTestX)
+print(newTestX.shape)
+
+in_encoder = Normalizer(norm='l2')
+trainX = in_encoder.transform(newTrainX)
+testX = in_encoder.transform(newTestX)
+# label encode targets
+out_encoder = LabelEncoder()
+out_encoder.fit(numpy_labels)
+trainy = out_encoder.transform(numpy_labels)
+testy = out_encoder.transform(numpy_labels_test)
+# fit model
+model = SVC(kernel='linear', probability=True)
+model.fit(trainX, trainy)
+# predict
+yhat_train = model.predict(trainX)
+yhat_test = model.predict(testX)
+# score
+score_train = accuracy_score(trainy, yhat_train)
+score_test = accuracy_score(testy, yhat_test)
+# summarize
+print('Accuracy: train=%.3f, test=%.3f' % (score_train*100, score_test*100))
